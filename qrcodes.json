@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-02-09T17:18:46.336Z",
+  "totalQRCodes": 5,
+  "totalVisits": 10,
+  "qrCodes": {
+    "loja-touti": {
+      "id": "loja-touti",
+      "destination_url": "https://touti.com.br/",
+      "short_url": "https://backend-qrcode-yiuy.onrender.com/r/loja-touti",
+      "visits": 2,
+      "last_visit": "2026-02-09T17:03:44.983Z",
+      "created_at": "2026-02-09T16:50:12.421Z",
+      "updated_at": "2026-02-09T16:50:12.421Z"
+    },
+    "touti-visca-el-barca": {
+      "id": "touti-visca-el-barca",
+      "destination_url": "https://touti.com.br/products/visca-el-barca-desodorante-colonia-100ml",
+      "short_url": "https://backend-qrcode-yiuy.onrender.com/r/touti-visca-el-barca",
+      "visits": 2,
+      "last_visit": "2026-02-09T17:03:33.478Z",
+      "created_at": "2026-02-09T16:50:34.878Z",
+      "updated_at": "2026-02-09T16:50:34.878Z"
+    },
+    "touti-kit-manchester-city": {
+      "id": "touti-kit-manchester-city",
+      "destination_url": "https://touti.com.br/products/kit-cityzens-blue-moon",
+      "short_url": "https://backend-qrcode-yiuy.onrender.com/r/touti-kit-manchester-city",
+      "visits": 2,
+      "last_visit": "2026-02-09T17:03:15.240Z",
+      "created_at": "2026-02-09T16:51:04.587Z",
+      "updated_at": "2026-02-09T16:51:04.587Z"
+    },
+    "touti-juventus": {
+      "id": "touti-juventus",
+      "destination_url": "https://touti.com.br/products/bianconeri-desodorante-colonia-100ml",
+      "short_url": "https://backend-qrcode-yiuy.onrender.com/r/touti-juventus",
+      "visits": 2,
+      "last_visit": "2026-02-09T17:02:56.784Z",
+      "created_at": "2026-02-09T16:51:33.133Z",
+      "updated_at": "2026-02-09T16:51:33.133Z"
+    },
+    "touti-marina-ferrari": {
+      "id": "touti-marina-ferrari",
+      "destination_url": "https://touti.com.br/pages/marina-ferrari",
+      "short_url": "https://backend-qrcode-yiuy.onrender.com/r/touti-marina-ferrari",
+      "visits": 2,
+      "last_visit": "2026-02-09T17:02:38.906Z",
+      "created_at": "2026-02-09T16:52:11.690Z",
+      "updated_at": "2026-02-09T16:52:11.690Z"
+    }
+  }
+}
