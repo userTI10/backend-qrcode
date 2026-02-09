@@ -2,7 +2,6 @@
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -11,12 +10,19 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// Configuração da URL base
+const BASE_URL = process.env.NODE_ENV === 'production' 
+  ? 'https://backend-qrcode.vercel.app'
+  : `http://localhost:${PORT}`;
+
+console.log(`🌐 URL base configurada: ${BASE_URL}`);
+
 // Inicializar banco de dados SQLite
 const db = new sqlite3.Database('./qrcodes.db', (err) => {
   if (err) {
     console.error('Erro ao conectar ao banco de dados:', err.message);
   } else {
-    console.log('Conectado ao banco de dados SQLite');
+    console.log('✅ Conectado ao banco de dados SQLite');
     
     // Criar tabela se não existir
     db.run(`CREATE TABLE IF NOT EXISTS qrcodes (
@@ -94,7 +100,8 @@ app.post('/api/create-qr', async (req, res) => {
       }
     }
     
-    const shortUrl = `http://localhost:${PORT}/r/${shortId}`;
+    // Usar a URL base configurada
+    const shortUrl = `${BASE_URL}/r/${shortId}`;
     const now = new Date().toISOString();
     
     // Inserir no banco de dados
@@ -250,16 +257,16 @@ app.get('/api/stats', async (req, res) => {
     const stats = await dbGet(`
       SELECT 
         COUNT(*) as totalQRCodes,
-        SUM(visits) as totalVisits,
-        AVG(visits) as avgVisits,
-        MAX(visits) as maxVisits,
+        COALESCE(SUM(visits), 0) as totalVisits,
+        COALESCE(AVG(visits), 0) as avgVisits,
+        COALESCE(MAX(visits), 0) as maxVisits,
         MAX(created_at) as mostRecent
       FROM qrcodes
     `);
     
     // Popular QR codes (mais de 10 visitas)
     const popular = await dbAll(
-      'SELECT id, destination_url, visits FROM qrcodes WHERE visits > 10 ORDER BY visits DESC LIMIT 5'
+      'SELECT id, destination_url, visits FROM qrcodes WHERE visits > 0 ORDER BY visits DESC LIMIT 5'
     );
     
     res.json({
@@ -333,7 +340,7 @@ app.get('/r/:id', async (req, res) => {
         <body>
           <h1>QR Code não encontrado</h1>
           <p>O QR Code que você está tentando acessar não existe ou foi removido.</p>
-          <p><a href="http://localhost:3000">Voltar à página inicial</a></p>
+          <p><a href="${BASE_URL}">Voltar à página inicial</a></p>
         </body>
         </html>
       `);
@@ -341,7 +348,7 @@ app.get('/r/:id', async (req, res) => {
     
     // Incrementar contador de visitas e atualizar última visita
     const now = new Date().toISOString();
-    const newVisits = qrData.visits + 1;
+    const newVisits = (qrData.visits || 0) + 1;
     
     await dbRun(
       'UPDATE qrcodes SET visits = ?, last_visit = ? WHERE id = ?',
@@ -366,7 +373,7 @@ app.get('/', async (req, res) => {
     const stats = await dbGet(`
       SELECT 
         COUNT(*) as total,
-        SUM(visits) as visits
+        COALESCE(SUM(visits), 0) as visits
       FROM qrcodes
     `);
     
@@ -449,7 +456,7 @@ app.get('/', async (req, res) => {
           <h3>📊 Estatísticas do Sistema:</h3>
           <p><strong>Total de QR Codes:</strong> ${stats?.total || 0}</p>
           <p><strong>Total de Visitantes:</strong> ${stats?.visits || 0}</p>
-          <a href="http://localhost:3000" class="btn">Acessar Interface Web</a>
+          <a href="${BASE_URL}" class="btn">Página Inicial do Servidor</a>
         </div>
         
         <div class="api-list">
@@ -481,6 +488,16 @@ app.get('/', async (req, res) => {
   }
 });
 
+// Rota de health check
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    baseUrl: BASE_URL,
+    timestamp: new Date().toISOString(),
+    environment: process.env.NODE_ENV || 'development'
+  });
+});
+
 // Fechar conexão com o banco ao encerrar
 process.on('SIGINT', () => {
   db.close((err) => {
@@ -495,8 +512,8 @@ process.on('SIGINT', () => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor rodando na porta ${PORT}`);
-  console.log(`🌐 Acesse: http://localhost:${PORT}`);
-  console.log(`🔧 API disponível em: http://localhost:${PORT}/api`);
-  console.log(`📱 Exemplo de redirecionamento: http://localhost:${PORT}/r/exemplo`);
+  console.log(`🌐 URL Base: ${BASE_URL}`);
+  console.log(`🔧 API disponível em: ${BASE_URL}/api`);
+  console.log(`📱 Exemplo de redirecionamento: ${BASE_URL}/r/exemplo`);
   console.log(`💾 Banco de dados: qrcodes.db`);
 });
