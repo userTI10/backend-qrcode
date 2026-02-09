@@ -2,7 +2,6 @@
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -11,12 +10,19 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// Configuração da URL base
-const BASE_URL = process.env.RENDER_EXTERNAL_URL 
-  ? `https://${process.env.RENDER_EXTERNAL_URL}`
-  : process.env.NODE_ENV === 'production'
-    ? 'https://backend-qrcode-yiuy.onrender.com'
-    : `http://localhost:${PORT}`;
+// Configuração da URL base - CORRIGIDO
+let BASE_URL;
+
+if (process.env.RENDER_EXTERNAL_URL) {
+  // Se já tiver https://, usar direto, senão adicionar
+  BASE_URL = process.env.RENDER_EXTERNAL_URL.startsWith('http') 
+    ? process.env.RENDER_EXTERNAL_URL
+    : `https://${process.env.RENDER_EXTERNAL_URL}`;
+} else if (process.env.NODE_ENV === 'production') {
+  BASE_URL = 'https://backend-qrcode-yiuy.onrender.com';
+} else {
+  BASE_URL = `http://localhost:${PORT}`;
+}
 
 console.log(`🌐 URL base configurada: ${BASE_URL}`);
 console.log(`🚀 Ambiente: ${process.env.NODE_ENV || 'development'}`);
