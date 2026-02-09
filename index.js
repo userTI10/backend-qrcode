@@ -1,7 +1,8 @@
-// backend/server.js
+// backend/server.js 
 const express = require('express');
 const cors = require('cors');
 const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -11,16 +12,28 @@ app.use(cors());
 app.use(express.json());
 
 // Configuração da URL base
-const BASE_URL = process.env.NODE_ENV === 'production' 
-  ? 'https://backend-qrcode.vercel.app'
-  : `http://localhost:${PORT}`;
+const BASE_URL = process.env.RENDER_EXTERNAL_URL 
+  ? `https://${process.env.RENDER_EXTERNAL_URL}`
+  : process.env.NODE_ENV === 'production'
+    ? 'https://backend-qrcode-yiuy.onrender.com'
+    : `http://localhost:${PORT}`;
 
 console.log(`🌐 URL base configurada: ${BASE_URL}`);
+console.log(`🚀 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+console.log(`🔗 Render URL: ${process.env.RENDER_EXTERNAL_URL || 'N/A'}`);
 
 // Inicializar banco de dados SQLite
-const db = new sqlite3.Database('./qrcodes.db', (err) => {
+// No Render, o caminho do arquivo é persistente
+const dbPath = process.env.NODE_ENV === 'production' 
+  ? '/tmp/qrcodes.db'  // No Render, /tmp é persistente
+  : './qrcodes.db';
+
+console.log(`💾 Caminho do banco de dados: ${dbPath}`);
+
+const db = new sqlite3.Database(dbPath, (err) => {
   if (err) {
-    console.error('Erro ao conectar ao banco de dados:', err.message);
+    console.error('❌ Erro ao conectar ao banco de dados:', err.message);
+    console.error('Detalhes do erro:', err);
   } else {
     console.log('✅ Conectado ao banco de dados SQLite');
     
@@ -33,11 +46,39 @@ const db = new sqlite3.Database('./qrcodes.db', (err) => {
       last_visit TIMESTAMP,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )`);
-    
-    // Criar índice para melhor performance
-    db.run('CREATE INDEX IF NOT EXISTS idx_qrcodes_id ON qrcodes(id)');
-    db.run('CREATE INDEX IF NOT EXISTS idx_qrcodes_created ON qrcodes(created_at)');
+    )`, (err) => {
+      if (err) {
+        console.error('❌ Erro ao criar tabela:', err.message);
+      } else {
+        console.log('✅ Tabela qrcodes verificada/criada com sucesso');
+        
+        // Criar índice para melhor performance
+        db.run('CREATE INDEX IF NOT EXISTS idx_qrcodes_id ON qrcodes(id)', (err) => {
+          if (err) {
+            console.error('❌ Erro ao criar índice id:', err.message);
+          } else {
+            console.log('✅ Índice idx_qrcodes_id verificado/criado');
+          }
+        });
+        
+        db.run('CREATE INDEX IF NOT EXISTS idx_qrcodes_created ON qrcodes(created_at)', (err) => {
+          if (err) {
+            console.error('❌ Erro ao criar índice created:', err.message);
+          } else {
+            console.log('✅ Índice idx_qrcodes_created verificado/criado');
+          }
+        });
+        
+        // Verificar se a tabela tem dados
+        db.get('SELECT COUNT(*) as count FROM qrcodes', (err, row) => {
+          if (err) {
+            console.error('❌ Erro ao contar registros:', err.message);
+          } else {
+            console.log(`📊 Total de QR codes no banco: ${row.count}`);
+          }
+        });
+      }
+    });
   }
 });
 
@@ -46,12 +87,16 @@ function generateShortId() {
   return Math.random().toString(36).substr(2, 8);
 }
 
-// Helper para promises com SQLite
+// Helper para promises com SQLite com tratamento de erro melhorado
 const dbRun = (sql, params = []) => {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function(err) {
-      if (err) reject(err);
-      else resolve(this);
+      if (err) {
+        console.error(`❌ Erro dbRun na query: ${sql}`, err.message);
+        reject(err);
+      } else {
+        resolve(this);
+      }
     });
   });
 };
@@ -59,8 +104,12 @@ const dbRun = (sql, params = []) => {
 const dbGet = (sql, params = []) => {
   return new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
+      if (err) {
+        console.error(`❌ Erro dbGet na query: ${sql}`, err.message);
+        reject(err);
+      } else {
+        resolve(row);
+      }
     });
   });
 };
@@ -68,15 +117,30 @@ const dbGet = (sql, params = []) => {
 const dbAll = (sql, params = []) => {
   return new Promise((resolve, reject) => {
     db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
+      if (err) {
+        console.error(`❌ Erro dbAll na query: ${sql}`, err.message);
+        reject(err);
+      } else {
+        resolve(rows || []);
+      }
     });
   });
 };
 
+// Middleware para verificar conexão com banco
+const checkDbConnection = (req, res, next) => {
+  if (!db) {
+    console.error('❌ Banco de dados não conectado');
+    return res.status(500).json({ error: 'Banco de dados não conectado' });
+  }
+  next();
+};
+
 // API para criar um QR code dinâmico
-app.post('/api/create-qr', async (req, res) => {
+app.post('/api/create-qr', checkDbConnection, async (req, res) => {
   const { destinationUrl, customId } = req.body;
+  
+  console.log(`📝 Criando QR code para: ${destinationUrl}, ID custom: ${customId || 'auto'}`);
   
   if (!destinationUrl) {
     return res.status(400).json({ error: 'URL de destino é obrigatória' });
@@ -104,11 +168,15 @@ app.post('/api/create-qr', async (req, res) => {
     const shortUrl = `${BASE_URL}/r/${shortId}`;
     const now = new Date().toISOString();
     
+    console.log(`🔗 Short URL: ${shortUrl}`);
+    
     // Inserir no banco de dados
     await dbRun(
       'INSERT INTO qrcodes (id, destination_url, short_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
       [shortId, destinationUrl, shortUrl, now, now]
     );
+    
+    console.log(`✅ QR Code criado: ${shortId}`);
     
     res.json({
       shortId,
@@ -120,15 +188,20 @@ app.post('/api/create-qr', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Erro ao criar QR code:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ Erro ao criar QR code:', error.message);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // API para atualizar destino de um QR code existente
-app.put('/api/update-qr/:id', async (req, res) => {
+app.put('/api/update-qr/:id', checkDbConnection, async (req, res) => {
   const { id } = req.params;
   const { destinationUrl } = req.body;
+  
+  console.log(`🔄 Atualizando QR code ${id} para: ${destinationUrl}`);
   
   if (!destinationUrl) {
     return res.status(400).json({ error: 'Nova URL de destino é obrigatória' });
@@ -156,6 +229,8 @@ app.put('/api/update-qr/:id', async (req, res) => {
       [destinationUrl, updatedAt, id]
     );
     
+    console.log(`✅ QR Code atualizado: ${id}`);
+    
     res.json({
       success: true,
       message: 'URL de destino atualizada com sucesso',
@@ -165,14 +240,19 @@ app.put('/api/update-qr/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Erro ao atualizar QR code:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ Erro ao atualizar QR code:', error.message);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // API para deletar um QR code
-app.delete('/api/delete-qr/:id', async (req, res) => {
+app.delete('/api/delete-qr/:id', checkDbConnection, async (req, res) => {
   const { id } = req.params;
+  
+  console.log(`🗑️  Deletando QR code: ${id}`);
   
   try {
     // Verificar se QR code existe
@@ -182,7 +262,9 @@ app.delete('/api/delete-qr/:id', async (req, res) => {
     }
     
     // Deletar do banco de dados
-    const result = await dbRun('DELETE FROM qrcodes WHERE id = ?', [id]);
+    await dbRun('DELETE FROM qrcodes WHERE id = ?', [id]);
+    
+    console.log(`✅ QR Code deletado: ${id}`);
     
     res.json({
       success: true,
@@ -191,14 +273,19 @@ app.delete('/api/delete-qr/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Erro ao deletar QR code:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ Erro ao deletar QR code:', error.message);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // API para obter informações de um QR code
-app.get('/api/qr-info/:id', async (req, res) => {
+app.get('/api/qr-info/:id', checkDbConnection, async (req, res) => {
   const { id } = req.params;
+  
+  console.log(`🔍 Buscando informações do QR code: ${id}`);
   
   try {
     const qrData = await dbGet(
@@ -221,13 +308,18 @@ app.get('/api/qr-info/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('Erro ao buscar QR code:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ Erro ao buscar QR code:', error.message);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // API para listar todos os QR codes
-app.get('/api/qr-codes', async (req, res) => {
+app.get('/api/qr-codes', checkDbConnection, async (req, res) => {
+  console.log('📋 Listando todos QR codes');
+  
   try {
     const qrCodes = await dbAll(
       'SELECT * FROM qrcodes ORDER BY created_at DESC'
@@ -243,16 +335,23 @@ app.get('/api/qr-codes', async (req, res) => {
       updatedAt: qr.updated_at
     }));
     
+    console.log(`✅ Retornando ${formattedQrCodes.length} QR codes`);
+    
     res.json(formattedQrCodes);
     
   } catch (error) {
-    console.error('Erro ao listar QR codes:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ Erro ao listar QR codes:', error.message);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // API para obter estatísticas
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', checkDbConnection, async (req, res) => {
+  console.log('📊 Obtendo estatísticas');
+  
   try {
     const stats = await dbGet(`
       SELECT 
@@ -272,21 +371,26 @@ app.get('/api/stats', async (req, res) => {
     res.json({
       totalQRCodes: stats.totalQRCodes || 0,
       totalVisits: stats.totalVisits || 0,
-      avgVisits: Math.round(stats.avgVisits * 100) / 100 || 0,
+      avgVisits: Math.round((stats.avgVisits || 0) * 100) / 100,
       maxVisits: stats.maxVisits || 0,
       mostRecent: stats.mostRecent,
-      popularQRCodes: popular
+      popularQRCodes: popular || []
     });
     
   } catch (error) {
-    console.error('Erro ao obter estatísticas:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ Erro ao obter estatísticas:', error.message);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // API para buscar QR codes
-app.get('/api/search', async (req, res) => {
+app.get('/api/search', checkDbConnection, async (req, res) => {
   const { query } = req.query;
+  
+  console.log(`🔎 Buscando QR codes por: "${query}"`);
   
   if (!query) {
     return res.status(400).json({ error: 'Termo de busca é obrigatório' });
@@ -308,22 +412,30 @@ app.get('/api/search', async (req, res) => {
       updatedAt: qr.updated_at
     }));
     
+    console.log(`✅ Busca retornou ${formattedQrCodes.length} resultados`);
+    
     res.json(formattedQrCodes);
     
   } catch (error) {
-    console.error('Erro ao buscar QR codes:', error);
-    res.status(500).json({ error: 'Erro interno do servidor' });
+    console.error('❌ Erro ao buscar QR codes:', error.message);
+    res.status(500).json({ 
+      error: 'Erro interno do servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // Rota de redirecionamento (esta é a URL que estará no QR code)
-app.get('/r/:id', async (req, res) => {
+app.get('/r/:id', checkDbConnection, async (req, res) => {
   const { id } = req.params;
+  
+  console.log(`🔗 Redirecionamento solicitado para QR code: ${id}`);
   
   try {
     const qrData = await dbGet('SELECT * FROM qrcodes WHERE id = ?', [id]);
     
     if (!qrData) {
+      console.log(`❌ QR Code não encontrado: ${id}`);
       return res.status(404).send(`
         <!DOCTYPE html>
         <html>
@@ -340,6 +452,7 @@ app.get('/r/:id', async (req, res) => {
         <body>
           <h1>QR Code não encontrado</h1>
           <p>O QR Code que você está tentando acessar não existe ou foi removido.</p>
+          <p>ID: <strong>${id}</strong></p>
           <p><a href="${BASE_URL}">Voltar à página inicial</a></p>
         </body>
         </html>
@@ -355,15 +468,67 @@ app.get('/r/:id', async (req, res) => {
       [newVisits, now, id]
     );
     
-    console.log(`Redirecionando QR Code ${id} para: ${qrData.destination_url}`);
-    console.log(`Total de visitas: ${newVisits}`);
+    console.log(`✅ Redirecionando QR Code ${id} para: ${qrData.destination_url} (visitas: ${newVisits})`);
     
     // Redirecionar para a URL de destino
     res.redirect(302, qrData.destination_url);
     
   } catch (error) {
-    console.error('Erro no redirecionamento:', error);
-    res.status(500).send('Erro interno do servidor');
+    console.error('❌ Erro no redirecionamento:', error.message);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Erro no Servidor</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          h1 { color: #e74c3c; }
+        </style>
+      </head>
+      <body>
+        <h1>Erro interno do servidor</h1>
+        <p>Desculpe, ocorreu um erro ao processar seu QR Code.</p>
+        <p>Tente novamente mais tarde.</p>
+        <p><a href="${BASE_URL}">Voltar à página inicial</a></p>
+      </body>
+      </html>
+    `);
+  }
+});
+
+// Rota de health check aprimorada
+app.get('/api/health', checkDbConnection, async (req, res) => {
+  try {
+    // Testar conexão com o banco
+    const dbTest = await dbGet('SELECT COUNT(*) as count FROM sqlite_master WHERE type="table"');
+    const qrCount = await dbGet('SELECT COUNT(*) as count FROM qrcodes');
+    
+    res.json({
+      status: 'healthy',
+      baseUrl: BASE_URL,
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV || 'development',
+      database: {
+        connected: true,
+        tables: dbTest.count,
+        qrCodes: qrCount.count
+      },
+      render: {
+        externalUrl: process.env.RENDER_EXTERNAL_URL,
+        serviceId: process.env.RENDER_SERVICE_ID
+      },
+      memory: {
+        heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + ' MB',
+        heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024) + ' MB'
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'unhealthy',
+      error: 'Database connection failed',
+      message: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 });
 
@@ -442,21 +607,39 @@ app.get('/', async (req, res) => {
             border-radius: 5px;
             text-decoration: none;
             margin-top: 10px;
+            margin-right: 10px;
           }
           .btn:hover {
             background: #2980b9;
+          }
+          .status-badge {
+            display: inline-block;
+            background: #2ecc71;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.9em;
+            margin-left: 10px;
+          }
+          .render-badge {
+            background: #46b3a4;
           }
         </style>
       </head>
       <body>
         <h1>📱 Servidor de QR Codes Dinâmicos</h1>
-        <p class="subtitle">Banco de dados SQLite | Persistência total</p>
+        <p class="subtitle">Render.com + SQLite <span class="status-badge render-badge">Persistente</span></p>
         
         <div class="stats">
           <h3>📊 Estatísticas do Sistema:</h3>
           <p><strong>Total de QR Codes:</strong> ${stats?.total || 0}</p>
           <p><strong>Total de Visitantes:</strong> ${stats?.visits || 0}</p>
-          <a href="${BASE_URL}" class="btn">Página Inicial do Servidor</a>
+          <p><strong>URL Base:</strong> ${BASE_URL}</p>
+          <div>
+            <a href="${BASE_URL}/api/health" class="btn">🩺 Verificar Saúde</a>
+            <a href="${BASE_URL}/api/qr-codes" class="btn">📋 Ver QR Codes</a>
+            <a href="https://render.com" class="btn" target="_blank">🚀 Render.com</a>
+          </div>
         </div>
         
         <div class="api-list">
@@ -474,46 +657,66 @@ app.get('/', async (req, res) => {
         </div>
         
         <div class="database-info">
-          <h3>💾 Banco de Dados SQLite</h3>
-          <p>Os dados estão sendo armazenados no arquivo <code>qrcodes.db</code></p>
-          <p>Todos os QR codes são persistentes e sobrevivem a reinicializações do servidor.</p>
+          <h3>💾 Banco de Dados SQLite no Render</h3>
+          <p>✅ Dados persistentes armazenados em: <code>${dbPath}</code></p>
+          <p>✅ Sobrevive a reinicializações do servidor</p>
+          <p>✅ Backup automático do arquivo .db</p>
+          <p>✅ Compatível com o sistema de serviços do Render</p>
         </div>
       </body>
       </html>
     `);
     
   } catch (error) {
-    console.error('Erro na rota principal:', error);
-    res.status(500).send('Erro interno do servidor');
+    console.error('❌ Erro na rota principal:', error);
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Erro no Servidor</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+          h1 { color: #e74c3c; }
+        </style>
+      </head>
+      <body>
+        <h1>Erro ao conectar com o banco de dados</h1>
+        <p>Verifique as configurações do SQLite no Render.</p>
+        <p><a href="${BASE_URL}/api/health">Verificar saúde do sistema</a></p>
+      </body>
+      </html>
+    `);
   }
-});
-
-// Rota de health check
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    baseUrl: BASE_URL,
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
 });
 
 // Fechar conexão com o banco ao encerrar
 process.on('SIGINT', () => {
   db.close((err) => {
     if (err) {
-      console.error('Erro ao fechar banco de dados:', err.message);
+      console.error('❌ Erro ao fechar banco de dados:', err.message);
     } else {
-      console.log('Conexão com banco de dados fechada');
+      console.log('✅ Conexão com banco de dados fechada');
     }
     process.exit(0);
   });
 });
 
+// Tratamento de erros não capturados
+process.on('uncaughtException', (error) => {
+  console.error('❌ Erro não capturado:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promise rejeitada não tratada:', reason);
+});
+
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`\n🚀 Servidor iniciado com sucesso!`);
   console.log(`🌐 URL Base: ${BASE_URL}`);
   console.log(`🔧 API disponível em: ${BASE_URL}/api`);
-  console.log(`📱 Exemplo de redirecionamento: ${BASE_URL}/r/exemplo`);
-  console.log(`💾 Banco de dados: qrcodes.db`);
+  console.log(`📱 Redirecionamento: ${BASE_URL}/r/:id`);
+  console.log(`💾 Banco de dados: ${dbPath}`);
+  console.log(`⚡ Porta: ${PORT}`);
+  console.log(`📊 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`\n✅ Pronto para receber requisições!\n`);
 });
